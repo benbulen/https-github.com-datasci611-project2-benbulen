@@ -1,0 +1,219 @@
+---
+  title: "BIOS 611 Project 2"
+  author: "(Benjamin Bulen)"
+  date: "`r format(Sys.time(), '%m/%d/%Y')`"
+  output: html_document
+---
+
+  This project is due `Monday October 22th by 6pm`.  
+  Both `.Rmd` and `.html` files should be submitted.  
+ 
+```{r}
+#Find Data
+# Load data to merge for this project. The intent is to look at relationships between hate crimes and the general resident health in each state. I will be using data from 538 and also National life expectancy data from https://healthinequality.org/data/
+    library(tidyverse)
+    library(fivethirtyeight)
+    library(lazyeval)
+    library(ggsignif)   
+
+
+# My hope is the data is easily accessible to anyone reviewing this document by loading in this format as opposed to pulling it from  my personal laptap as I was doing initially
+hc <- fivethirtyeight::hate_crimes
+ineq <- as.tibble(read.csv(url("https://healthinequality.org/dl/health_ineq_online_table_3.csv")))
+
+
+
+# The readme for the health inequality data can be found here and is helpful when questions arise about what information arises in the variables
+#https://healthinequality.org/dl/health_ineq_online_table_3_readme.pdf
+
+
+```
+ 
+```{r}
+#Perform one join
+# Perform the join on datasets by State name, both datasets have all 50 states and D.C.
+# First we want to make sure the columns we are joining over are the same type of variable. The left_join in dplyr will force character and factors into the same "type" to perform the join but it is a good habit to make sure we join like variables.
+ineq$statename <- as.character(ineq$statename)
+
+# Also District of Columbia is different in both datasets so we will fix that for a more complete join.
+
+ineq[9,3]<-"District of Columbia"
+
+df<-left_join(hc, ineq, by = c("state"="statename"))
+
+# Now we have our full dataset ready to wrangle
+```
+ 
+```{r}
+#Use a for loop >= 1 time
+#Here I will use a for loop to define a new variable as the total number of hate crimes in a state. 
+for (i in 1:nrow(df)){
+  n_hate_crimes <- df$hate_crimes_per_100k_splc*100000
+}
+  df <- cbind(df,n_hate_crimes)
+
+```
+
+```{r}
+# I have been finding myself looking up specific states for certain criteria that I am interested in. Mostly out of curiousity and not driving the analysis but it is nice to have a quick way to spot check states for these attributes. So I wrote a function that returns the median house income, both average hate crime scores (SPLC/FBI), share of population that is unemployed and the life expectancy (adjusted/unadjusted for race)
+key_stats<-function(dataset,col_name,value){
+  dataset%>%
+    filter(col_name==value)%>%
+    select(state, median_house_inc,share_unemp_seas,avg_hatecrimes_per_100k_fbi,le_agg_q2_F,le_raceadj_q2_F,le_agg_q2_M,le_raceadj_q2_M) -> dataset2
+  return(dataset2)
+}
+
+key_stats(df,"state","Ohio")
+
+# This function does not appear to be working, I believe my scope my be off but I can't seem to figure it out. Here is a much simpler function that is not super relevant to this project but works.
+
+
+z_score<- function(value, mean, stddev) {
+  z_score = (value-mean)/stddev
+  return(z_score)
+}
+
+z_score(17, 10, 3)
+
+```
+
+Very simplistic look into the data to help guide further figures and analyses, masked to not show all the plots I looked at prior to deciding on a direction.
+```{r, eval=FALSE}
+library(tidyverse)
+hist(df$avg_hatecrimes_per_100k_fbi)
+hist(df$le_agg_q2_M)
+hist(df$le_raceadj_q2_M)
+
+attach(df)
+plot(median_house_inc, avg_hatecrimes_per_100k_fbi)
+plot(median_house_inc, le_agg_q2_M)
+plot(median_house_inc, le_agg_q2_F)
+
+df<- mutate(df, IQR_M = le_agg_q3_M-le_agg_q1_M, IQR_F = le_agg_q3_F-le_agg_q1_F, IQR_M_adj=le_raceadj_q3_M-le_raceadj_q1_M, IQR_F_adj=le_raceadj_q3_F-le_raceadj_q1_F)
+
+mean(df[,"IQR_M"])
+mean(df[,"IQR_F"])
+```
+ 
+ 
+ My main interest in choosing these datasets was seeing if there was any relationship between hate crimes and life expectancy. I would also think that income plays a big role in life expectancy and to an extent the rate of hate crimes. This figure is intended to look at those relationships.
+```{r}
+#Remove missing data for Wyoming, South Dakota, North Dakota, Hawaii
+df1<-df[df$state != 'Wyoming',]
+df2<-df1[df1$state != 'South Dakota',]
+df3<-df2[df2$state != 'North Dakota',]
+df_complete<-df3[df3$state != 'Hawaii',]
+
+df_complete$MedianIncome <- df_complete$median_house_inc
+
+ggplot() + 
+geom_point(data=df_complete, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_M, alpha=MedianIncome), shape=16, color='blue') +
+geom_point(data=df_complete, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_F, alpha=MedianIncome), shape=15, color='red') +
+geom_smooth(data=df_complete, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_M), se=FALSE) + 
+geom_smooth(data=df_complete, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_F), se=FALSE, color='red') +
+annotate("text", x=11, y=79, label = "D.C.")+
+annotate("text", x=11, y=84, label = "D.C.")+
+annotate("text", x=0.5, y=85.5, label = "Females")+
+annotate("text", x=0.1, y=78.5, label = "Males")+
+      ggtitle("Scatterplot of Average Hate Crimes by State from 2010-2015\n and Corresponding Life Expectancy from 2001-2014")+
+      labs(x = "Average Hate Crimes per 100k", y="Life Expectancy") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+
+```
+ 
+ It does not look initially like there is much of a trend between average hate crimes and life expectancy in states. There is a very obvious outlier here in Washington D.C. I did not expect to see such an outlier in number of hate crimes for any particular state. However, after seeing this outlier it makes sense that D.C. has a higher hate crime rate. It is an extremely diverse area and it is also the epicenter of the United States for people to protest and that is obviously leading to more hate crimes.
+ 
+I would like to remove the data for the District of Columbia so we can get a better look at any possible trends in the rest of the states.
+
+```{r}
+#Remove District of Columbia data for this next plot
+df_complete %>%
+  filter(!(state=="District of Columbia")) ->df_complete2
+
+ggplot() + 
+geom_point(data=df_complete2, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_M, alpha=MedianIncome), shape=16, color='blue') +
+geom_point(data=df_complete2, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_F, alpha=MedianIncome), shape=15, color='red') +
+geom_smooth(data=df_complete2, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_M), se=FALSE) + 
+geom_smooth(data=df_complete2, mapping = aes(x = avg_hatecrimes_per_100k_fbi, y = le_agg_q2_F), se=FALSE, color='red') +
+annotate("text", x=0.5, y=85.5, label = "Females")+
+annotate("text", x=0.1, y=78.5, label = "Males")+
+      ggtitle("Scatterplot of Average Hate Crimes by State from 2010-2015\n and Corresponding Life Expectancy from 2001-2014")+
+      labs(x = "Average Hate Crimes per 100k", y="Life Expectancy") +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+
+cor1<-df_complete2$avg_hatecrimes_per_100k_fbi
+cor2<-df_complete2$le_agg_q2_M
+cor3<-df_complete2$le_agg_q2_F
+
+cor_1 <- cor(cor1,cor2, method="pearson")
+cor_2 <- cor(cor1,cor3, method="pearson")
+
+#cor_1
+#cor_2
+```
+Here we can see that there is not much of a trend between life expectency and average hate crimes for males and females. This is further seen with a peason correlation between female life expectancy and average hate crimes of 0.25 and 0.37 for males. There is a weak positive trend. 
+ 
+ 
+ Now I want to perform a formal test looking at whether or not average hate crimes for males and females significantly affects life expectancy. 
+ 
+```{r}
+#Need to transpose data here into a tall format for analysis, I will run the analysis with and without D.C. included as a sensitivity analysis.
+#Grab the columns of interest and stack them
+
+df_complete%>%
+  select(Life_Exp=le_agg_q2_F, Avg_hate=avg_hatecrimes_per_100k_fbi)%>%
+  mutate(group='Female') -> female
+
+df_complete%>%
+  select(Life_Exp=le_agg_q2_M, Avg_hate=avg_hatecrimes_per_100k_fbi)%>%
+  mutate(group='Male') -> male
+
+df_final1 <- rbind(female,male)
+
+# Delete data associated with D.C.
+df_final2 <- df_final1[df_final1$Avg_hate < 10,]
+
+#Perform statistical test
+fit <- anova(lm(Life_Exp ~ Avg_hate + group, data=df_final1))
+fit
+
+fit2 <- anova(lm(Life_Exp ~ Avg_hate + group, data=df_final2))
+fit2
+```
+ 
+ Here we can clearly see that gender is highly significant as a predictor for life expectancy. We could also see this seperation in the plot above. However, the average rate of hate crimes is not a significant predictor for the median life expectancy. Interestingly, when we remove the data associated with D.C. we see that average hate crimes actually is a statistically significant predictor for life expectency. This is surprising since there did not visually appear to be much of a positive or negative trend between life expectancy and hate crime rates. Actually, I would have guessed that since D.C. was such an outlier it might influence the signficance the other way. In other words, I expected having D.C. in the model might make the term for average hate crimes significant and upon removing D.C. the model would lose that significance.
+ 
+ Now I want to group states into 2 categories based on high crime rates and low crime rates. I will use the median crime rate to separate the groups. Then using this dataset compare the mean of the median household incomes between low and high hate crime states. 
+```{r}
+df_complete%>%
+  select(state, median_house_inc, avg_hatecrimes_per_100k_fbi) -> new_df
+
+median <- median(new_df$avg_hatecrimes_per_100k_fbi)
+
+new_df$median<-median
+
+group1 <- new_df[new_df$avg_hatecrimes_per_100k_fbi<median,]
+group2 <- new_df[new_df$avg_hatecrimes_per_100k_fbi>=median,]
+
+group1$group <- "Low"
+group2$group <- "High"
+
+group_df <- rbind(group1, group2)
+
+group_df %>%
+ggplot(aes(x=group, y=median_house_inc, fill=group)) +
+    geom_boxplot(alpha=0.5) +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="blue", fill="white") +
+    scale_fill_brewer(palette="Set2")+
+    ggtitle("Boxplot of Median Household Income for High and Low Crime States")+
+    labs(x = "Average Hate Crime Group", y="Median Household Income")+
+    geom_signif(comparisons = list(c("Low", "High")), test="t.test" ,
+              map_signif_level=TRUE) 
+```
+ 
+ Again we do not see a significant difference between the average rate of hate crimes and the median household income when we compare states with low hate crime rates to states with high hate crime rates (based on a median value cut-point) 
+ 
+ We have seen that average hate crime is a significant predictor for life expectancy when we remove an outlier in the D.C. hate crime rate. However, the median household income is not significantly associated with our average hate crime groupings. Some of these results certainly surprised me and I did not find the association with life expectancy I was expecting. However, it was still a very interesting dataset to explore and definitely left some questions that remain interesting. For instance, how does the proportion of population living in urban areas influence the average hate crime rate? Are the metrics for how progressive a state is and if so do those metrics significantly associate with the rate of hate crimes produced by the FBI? Given more time these are just 2 of the questions I also had interest in exploring.
+ 
+ 
